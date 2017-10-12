@@ -21,17 +21,14 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sync"
 
-	"github.com/fatih/color"
 	"github.com/gobwas/glob"
 	"github.com/spf13/cobra"
 )
 
 var gexp glob.Glob
 var exp *regexp.Regexp
-
-var red = color.New(color.FgRed).SprintFunc()
-var blue = color.New(color.FgBlue).SprintFunc()
 
 // RootCmd represents the base command when called without any subcommands
 var RootCmd = &cobra.Command{
@@ -70,22 +67,39 @@ to quickly create a Cobra application.`,
 }
 
 func find(path string, paths <-chan os.FileInfo) {
-	for p := range paths {
-		tp := filepath.Join(path, p.Name())
-		if exp.MatchString(tp) || gexp.Match(tp) {
-			fmt.Printf("%s\n", blue(tp))
-			continue
-		}
-		if p.IsDir() {
-			find(tp, walker(tp))
+	f := func() {
+		for p := range paths {
+			tp := filepath.Join(path, p.Name())
+			if exp.MatchString(tp) || gexp.Match(tp) {
+				fmt.Printf("%s\n", tp)
+				continue
+			}
+			if p.IsDir() {
+				find(tp, walker(tp))
+			}
 		}
 	}
+
+	f()
+	// workers(4, f)
+}
+
+func workers(n int, f func()) {
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			f()
+		}()
+	}
+	wg.Wait()
 }
 
 func walk(path string, ch chan os.FileInfo) {
 	files, err := ioutil.ReadDir(path)
 	if err != nil {
-		log.Printf("%v\n", red(err))
+		log.Printf("%v\n", err)
 		return
 	}
 	for _, f := range files {
@@ -107,7 +121,7 @@ func walker(path string) <-chan os.FileInfo {
 // This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() {
 	if err := RootCmd.Execute(); err != nil {
-		fmt.Println(red(err))
+		fmt.Println(err)
 		os.Exit(1)
 	}
 }
